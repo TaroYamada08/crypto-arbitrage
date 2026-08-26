@@ -1,61 +1,92 @@
 # Crypto Arbitrage
 
-Updated on Sep 16, 2023:
+Python 3 trading bot that scans for **triangular**, **cross-exchange (inventory)**, and **spot/perp basis** edges. Paper trading is the default. Live trading is triple-locked.
 
-I have moved on to develop other trading bots besides arbitrage. The best bot, Realistic Trading Bot (RTB), achieved a +2056% return using an aggressive model, while using the conservative model yielded a +418% return. The bots were backtested with data from 2019 to 2022. I have created a subscription service that provides trading signals for popular pairs. I will continue to add support for new pairs when there are enough requests.
+This is a rewrite of the 2017 Python 2 Bittrex bot. Exchange adapters are gone; [CCXT](https://github.com/ccxt/ccxt) provides unified markets, order books, and order placement.
 
-Currently the subscription service supports:
+## What changed
 
-- BTCUSD
-- ETHUSD
-- EURUSD
-- GBPJPY
-- XAUUSD
+The old bot fired three innermost limit orders and hoped they filled. This version:
 
-Link to RTB Trading Signal subscription: [https://kelvinausoftware.com/rtb-trading-signal/](https://kelvinausoftware.com/rtb-trading-signal/)
+- Uses **full order-book depth** (VWAP), not just the top level
+- Subtracts **taker fees + a slippage buffer** before calling anything an opportunity
+- **Binary-searches size** so larger clips that walk the book still clear the profit floor
+- Pre-filters triangles from a single `fetch_tickers` call, then hydrates books only for candidates
+- Treats cross-exchange arb as **pre-positioned inventory** (no on-trade withdrawals)
+- Adds a **cash-and-carry / funding scanner** (execution off unless you enable it)
+- Refuses live orders unless `paper: false`, `--live`, and `LIVE_TRADING=1` are all set
+- Cancels a sequential live path with a best-effort unwind if a later leg fails
 
-Link to RTB details and backtesting report: [https://kelvinausoftware.com/realistic-trading-bot-rbt/](https://kelvinausoftware.com/realistic-trading-bot-rbt/)
+Retail HFT this is not. Fees, latency, and inventory still eat most prints. Use it as a scanner first.
 
-Link to FREE Introduction of Professional Trader Course: [https://www.youtube.com/live/HmM4rWT49M8?si=146J_eTFFX6YnctI](https://www.youtube.com/live/HmM4rWT49M8?si=146J_eTFFX6YnctI) (Beginner-friendly and no experience required. Content enough to get you start trading.)
+## Strategies
 
-Link to full details of Professional Trader Course: [https://kelvinausoftware.com/professional-trader-course/](https://kelvinausoftware.com/professional-trader-course/) (I will  expain RTB algorithm in this course.)
-
-_+2056% backtest return on EURUSD in 2022_
-![image](https://kelvinau.github.io/crypto-arbitrage/reference/rtb_aggressive_model.gif?1)
-
----
-
-## Introduction
-
-This is an automatic trading bot using Triangular or Exchange Arbitrages. It reguarly checks and detects arbitrage opportunities, and place orders when a profit can be made. This works on any cryptocurrency pairs with minor configuration.  
-Started with $1000 in October 2017, there were some times that this made about $40/day for a few weeks with Triangular Arbitrage on Bittrex, but as the market is getting very unstable, the profit is hard to outrun the high price fluctuation.
-
-## Exchanges
-
-Bittrex, Bitfinex, Bitstamp, Kraken, Gatecoin (Not maintained anymore due to its extremely low volume)
+| Mode | Idea |
+| --- | --- |
+| `triangular` | Same-exchange 3-leg cycle (e.g. USDT → BTC → ETH → USDT). Needs inventory of all three assets if `execution.style` is `parallel`. |
+| `cross` | Buy the cheap venue, sell the rich one. Capital stays on both exchanges; rebalance later off-bot. |
+| `basis` | Spot vs USDT-perp: rich perp → cash-and-carry signal; also surfaces funding APR. Scan-only by default. |
 
 ## Setup
 
-1. Install Python 2 at here https://www.python.org/downloads/ if necessary. **This bot will not work with Python 3.**
-2. `pip install grequests`
-3. Rename or copy `.key_sample` files under `keys` to `.key` file, and add the APIs. E.g. Create a file `bittrex.key`. **Make sure not to push any API keys or this `.key` file.**
-4. Modify `arbitrage_config.json` for any other ticker pairs or exchanges
+Python **3.11+** (developed on 3.13).
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+```
+
+API keys are optional for scanning public books. Add them to `.env` only if you will fetch private balances or place live orders.
 
 ## Usage
 
-Triangular: `python main.py -m triangular`  
-Exchange: `python main.py -m exchange`  
-Mock mode is enabled by default, which does not place any order and just check and show any arbitrage opportunities. To turn off mock mode and run in production, add the argument `-p`.
+```bash
+python -m arbitrage doctor
+python -m arbitrage scan
+python -m arbitrage scan --strategy triangular --once
+python -m arbitrage run
+python -m arbitrage run --strategy cross
+```
 
-## Difficulties
+`main.py` is a thin wrapper around the same CLI.
 
-1. The trading fee is the largest obstacle. Most of the exchanges have a 0.25% fee. The profit will be larger if the fee can be lower.
-2. Sometimes not all the placed orders are executed, so there will be some manual work to rebalance. The bot should be able to deal with this situation, such as placing a market order, instead of just cancelling the open orders.
+Live trading (real money):
 
-## Further Improvement
+1. Set `paper: false` in `config.yaml`
+2. Set `LIVE_TRADING=1` in `.env`
+3. Run `python -m arbitrage run --live`
 
-1. Implement exchange rebalancing
-2. Handle open orders strategically
-3. Refactoring
+IOC limit orders are used by default (`execution.order_type: ioc`) at the worst book price the simulator consumed.
 
-I will put this project on hold now as the price goes up and down so much. Hope this can help anyone with similar interests.
+## Config
+
+See `config.yaml`. Useful knobs:
+
+- `triangular.min_profit_bps` — net edge after fees and the slippage buffer
+- `triangular.max_cycles` / `min_24h_volume_usd` — how many triangles to track
+- `risk.max_notional_usd` / `max_daily_loss_usd` / `max_trades_per_hour`
+- `risk.stale_book_ms` / `max_book_skew_ms` — drop cross-venue prints from mismatched clocks
+- `basis.execute` — keep `false` unless you accept futures liquidation risk
+
+Paper fills update `data/paper_state.json`. Logs go to `data/arbitrage.log`.
+
+## Tests
+
+```bash
+pytest
+```
+
+## Difficulties that still apply
+
+1. **Fees dominate.** A 6–10 bps floor is optimistic on 10 bps taker venues; VIP fees or maker flow change the math.
+2. **Latency.** A REST poll cannot beat colocated takers. Opportunities you see are often already gone.
+3. **Inventory.** Parallel triangular and spatial arb both need coins on the right books. Transfers are slow and are not done in the hot path.
+4. **Partial fills.** Sequential live mode tries to unwind; it can still leave you with residual risk.
+
+## Disclaimer
+
+Educational software. You can lose money, including more than the intended notional when futures are enabled. No warranty.
+
+Original project © 2017 Kelvin Au (MIT).

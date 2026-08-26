@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crypto-arbitrage"
+version = "2.0.0"
+description = "Modern triangular, cross-exchange, and basis arbitrage scanner/executor"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Kelvin Au" }]
+dependencies = [
+    "ccxt>=4.4.0",
+    "pydantic>=2.6.0",
+    "python-dotenv>=1.0.0",
+    "PyYAML>=6.0.1",
+    "rich>=13.7.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
+
+[project.scripts]
+arbitrage = "arbitrage.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["arbitrage*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]

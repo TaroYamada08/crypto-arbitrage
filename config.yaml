@@ -1,0 +1,71 @@
+# Paper mode is the default. Live trading is triple-locked:
+#   1) paper: false
+#   2) CLI flag --live
+#   3) env LIVE_TRADING=1
+paper: true
+
+exchanges:
+  binance:
+    enabled: true
+    sandbox: false
+  kraken:
+    enabled: true
+    sandbox: false
+  bybit:
+    enabled: false
+    sandbox: false
+
+risk:
+  max_notional_usd: 250
+  max_daily_loss_usd: 25
+  max_trades_per_hour: 30
+  stale_book_ms: 2500
+  max_book_skew_ms: 800
+  min_book_levels: 3
+  slippage_buffer_bps: 3.0
+
+execution:
+  # parallel = fire all legs at once (needs inventory of every asset)
+  # sequential = use proceeds of each fill (slower, start-asset only)
+  style: parallel
+  order_type: ioc          # ioc | limit | market
+  poll_interval_ms: 1500
+  book_depth: 20
+
+triangular:
+  enabled: true
+  execute: true
+  exchange: binance
+  start_currencies: [USDT, USDC, BTC]
+  quote_assets: [USDT, USDC, BTC, ETH]
+  max_cycles: 60
+  min_24h_volume_usd: 2000000
+  min_profit_bps: 6.0      # net, after fees + slippage buffer
+  min_notional_usd: 15
+
+cross_exchange:
+  enabled: true
+  execute: true
+  pairs:
+    - exchange_a: binance
+      symbol_a: ETH/USDT
+      exchange_b: kraken
+      symbol_b: ETH/USDT
+    - exchange_a: binance
+      symbol_a: BTC/USDT
+      exchange_b: kraken
+      symbol_b: BTC/USDT
+  min_profit_bps: 8.0
+  min_notional_usd: 20
+  # Alert when inventory share on one venue exceeds this (0.5 = 50/50 target)
+  rebalance_threshold: 0.35
+
+basis:
+  enabled: true
+  execute: false           # futures can liquidate; scan-only unless you turn this on
+  exchange: binance
+  symbols:
+    - BTC/USDT
+    - ETH/USDT
+  min_basis_bps: 12.0
+  min_funding_apr_pct: 8.0
